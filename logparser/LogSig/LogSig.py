@@ -14,28 +14,31 @@ import os
 import pandas as pd
 import hashlib
 
-
+#<comentario> Parametros de parseo
 class Para:
     def __init__(self, path, rex, savePath, groupNum, logformat): 
         self.path = path
-        self.rex = rex
+        self.rex = rex #<comentario> expresion regular
         self.savePath = savePath
         self.groupNum = groupNum  # partition into k groups
         self.logformat = logformat
 
+#<comentario> Parseador/analizador
 class LogParser:
+    #<comentario> constructtor
     def __init__(self, indir, outdir, groupNum, log_format, rex=[], seed=0):
 
-        self.para = Para(path=indir, rex=rex, savePath=outdir, groupNum=groupNum, logformat=log_format)
-        self.wordLL = []
+        self.para = Para(path=indir, rex=rex, savePath=outdir, groupNum=groupNum, logformat=log_format) #<comentario> paaramettros
+        self.wordLL = [] #<comentario> lista de listtas de palabras
         self.loglineNum = 0
-        self.termpairLLT = []
-        self.logNumPerGroup = []
+        self.termpairLLT = [] #<comentario> lista de listas de parejas termino- posicion
+        self.logNumPerGroup = [] #<comentario> numero de logs por grupo
         self.groupIndex = dict()  # each line corresponding to which group
         self.termPairLogNumLD = []
         self.logIndexPerGroup = []
         self.seed = seed
 
+    #<comentario> carga el dataset y usa expresiones regulares para separar los logs y remover columnas
     def loadLog(self):
         """ Load datasets and use regular expression to split it and remove some columns 
         """
@@ -43,6 +46,8 @@ class LogParser:
         headers, regex = self.generate_logformat_regex(self.para.logformat)
         self.df_log = self.log_to_dataframe(os.path.join(self.para.path, self.logname), regex, headers,
                                             self.para.logformat)
+        #<comentario> pasa los logs a tabla y por cada linea de la tabla checa las expresiones regulares en los parametros substituyendo los matches por caracteres vacios
+        #y convierte el log a una listta que se agrega a otra lista
         for idx, line in self.df_log.iterrows():
             line = line['Content']
             if self.para.rex:
@@ -52,6 +57,9 @@ class LogParser:
             wordSeq = line.strip().split()
             self.wordLL.append(tuple(wordSeq))
 
+    #<comentario> genera los pares de palabras para agregarlos a la lista termpairLLt donnde cada elemento es una lista de pares por log verifcando aquellos
+    #que contegan el caracter $ en ellos
+    #los divide en grupos aleatorios y cuentta la frecuencia de cada par en los grupos
     def termpairGene(self):
         print('Generating term pairs...')
         i = 0
@@ -93,6 +101,7 @@ class LogParser:
                 j += 1
             i += 1
 
+    #<comentario> genera un posible nuevo grupo para una lista de pareja y si son diferenttes al actual se cambia el grupo y se ajustan los contteos de frecuencias
     def LogMessParti(self):
         """ Use local search, for each log, find the group that it should be moved to.
             in this process, termpairs occurange should also make some changes and logNumber 
@@ -125,6 +134,7 @@ class LogParser:
                     self.logNumPerGroup[alterGroup] += 1
                 i += 1
 
+    #<comentario> define la signature que busca palabras candidatas a ser parte de los templates
     def signatConstr(self):
         """ Calculate the occurancy of each word of each group, and for each group, save the words that
             happen more than half all log number to be candidateTerms(list of dict, words:frequency),
@@ -193,37 +203,41 @@ class LogParser:
             sig = max(candidateSeq[i].items(), key=operator.itemgetter(1))[0]
             self.signature.append(sig)
 
+    #<comentario> 
     def writeResultToFile(self):
-        idx_eventID = {}
-        for idx, item in enumerate(self.signature):
-            eventStr = ' '.join(item)
-            idx_eventID[idx] = hashlib.md5(eventStr.encode('utf-8')).hexdigest()[0:8]
+        idx_eventID = {} #<comentario> diccionario para los hash de las firmas
+        for idx, item in enumerate(self.signature): #<comentario> por cada indice y elemento
+            eventStr = ' '.join(item) #<comentario> une la firma en un solo string
+            idx_eventID[idx] = hashlib.md5(eventStr.encode('utf-8')).hexdigest()[0:8] #<comentario> agrega en el numero de grupo (o de lista) los primeros 8 caracteres
+            #del hash de la firma
 
         EventId = []
         EventTemplate = []
-        LineId_groupId = []
+        LineId_groupId = [] #<comentario> Lista de pares (# de elemento en la lista, # de lista)
         for idx, item in enumerate(self.logIndexPerGroup):
             for LineId in item:
                 LineId_groupId.append([LineId, idx])
         LineId_groupId.sort(key=lambda x:x[0])
         for item in LineId_groupId:
-            GroupID = item[1]
+            GroupID = item[1] #<comentario> numero dee lista
             EventId.append(idx_eventID[GroupID])
-            EventTemplate.append(' '.join(self.signature[GroupID]))
+            EventTemplate.append(' '.join(self.signature[GroupID])) #<comentario> agragas el ttemplate uniendo las firmas de un grupo
 
+        #<comentario> creacion del csv de templates y elementtos
         self.df_log['EventId'] = EventId
         self.df_log['EventTemplate'] = EventTemplate
         self.df_log.to_csv(os.path.join(self.para.savePath, self.logname + '_structured.csv'), index=False)
 
 
-        occ_dict = dict(self.df_log['EventTemplate'].value_counts())
+        occ_dict = dict(self.df_log['EventTemplate'].value_counts()) #<comentario> diccionario de ocuurencias de los ttemplates
         df_event = pd.DataFrame()
-        df_event['EventTemplate'] = self.df_log['EventTemplate'].unique()
-        df_event['EventId'] = df_event['EventTemplate'].map(lambda x: hashlib.md5(x.encode('utf-8')).hexdigest()[0:8])
-        df_event['Occurrences'] = df_event['EventTemplate'].map(occ_dict)
-
+        df_event['EventTemplate'] = self.df_log['EventTemplate'].unique() #<comentario> templates unicos
+        df_event['EventId'] = df_event['EventTemplate'].map(lambda x: hashlib.md5(x.encode('utf-8')).hexdigest()[0:8]) #<comentario> hash de los templates
+        df_event['Occurrences'] = df_event['EventTemplate'].map(occ_dict) #<comentario> ocurrencias de los ttemplattes
+        #<comentario> csv de ttemplates
         df_event.to_csv(os.path.join(self.para.savePath, self.logname + '_templates.csv'), index=False, columns=["EventId", "EventTemplate","Occurrences"])
 
+    #<comentario> convierte los logs a una tabla que busca el match con expresiones regulares y especifica en quee linea aparecen
     def log_to_dataframe(self, log_file, regex, headers, logformat):
         """ Function to transform log file to dataframe """
         log_messages = []
@@ -242,16 +256,17 @@ class LogParser:
         logdf['LineId'] = [i + 1 for i in range(linecount)]
         return logdf
 
+    #<comentario> genera las expresiones regulares y los encabezados en base al formato
     def generate_logformat_regex(self, logformat):
         """ 
         Function to generate regular expression to split log messages
         """
         headers = []
-        splitters = re.split(r'(<[^<>]+>)', logformat)
+        splitters = re.split(r'(<[^<>]+>)', logformat) #<comentario> busca que el formato sean expresiones entre <>
         regex = ''
         for k in range(len(splitters)):
             if k % 2 == 0:
-                splitter = re.sub(' +', '\s+', splitters[k])
+                splitter = re.sub(' +', '\\\s+', splitters[k]) #<comentario> cambia los espacios por espacios en blanco (por ejemplo tabuladores o saltos de linea)
                 regex += splitter
             else:
                 header = splitters[k].strip('<').strip('>')
@@ -260,6 +275,7 @@ class LogParser:
         regex = re.compile('^' + regex + '$')
         return headers, regex
 
+    #<comentario> manda a llamar todas las funciones para el parseo
     def parse(self, logname):
         print('Parsing file: ' + os.path.join(self.para.path, logname))
         start_time = datetime.now()
@@ -271,7 +287,7 @@ class LogParser:
         self.writeResultToFile()
         print('Parsing done. [Time taken: {!s}]'.format(datetime.now() - start_time))
 
-
+#<comentario> determina el potencial de una frase a ser parte de un ttemplate
 def potenFunc(curGroupIndex, termPairLogNumLD, logNumPerGroup, lineNum, termpairLT, k):
     maxDeltaD = 0
     maxJ = curGroupIndex
@@ -297,3 +313,12 @@ def getDeltaD(logNumPerGroup, termPairLogNumLD, groupI, groupJ, lineNum, termpai
     deltaD = deltaD * 3
     return deltaD
 
+input_dir    = '../logs/HDFS/' # The input directory of log file
+output_dir   = 'LogSig_result/' # The output directory of parsing results
+log_file     = 'HDFS_2k.log' # The input log file name
+log_format   = '<Date> <Time> <Pid> <Level> <Component>: <Content>' # HDFS log format
+regex        = []  # Regular expression list for optional preprocessing (default: [])
+group_number = 14 # The number of message groups to partition
+
+parser = LogParser(input_dir, output_dir, group_number, log_format, rex=regex)
+parser.parse(log_file)
